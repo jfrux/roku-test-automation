@@ -78,21 +78,29 @@ class Utils {
 		return new Promise((resolve) => setTimeout(resolve, milliseconds));
 	}
 
-	public promiseTimeout<T>(promise: Promise<T>, milliseconds: number, message?: string) {
-		const timeout = new Promise<T>((resolve, reject) => {
-			setTimeout(() => {
+	public async promiseTimeout<T>(promise: Promise<T>, milliseconds: number, message?: string, request?: any) {
+		return promise;
+		let timeout;
+		const timeoutPromise = new Promise<T>((resolve, reject) => {
+			timeout = setTimeout(() => {
 				if (message === undefined) {
 					message = 'Timed out after ' + milliseconds + 'ms.';
 				}
-				reject(new Error(message));
+				reject(new Error(message + request.id));
 			}, milliseconds);
 		});
 
 		// Returns a race between our timeout and the passed in promise
-		return Promise.race([
-			promise,
-			timeout
-		]);
+		try {
+			return await Promise.race([
+				promise,
+				timeoutPromise
+			]);
+		} catch (e) {
+			throw e;
+		} finally {
+			clearTimeout(timeout);
+		}
 	}
 
 	public makeError(name: string, message: string) {
