@@ -19,7 +19,6 @@ sub runTaskThread()
 		"getFocusedNode": true
 		"getValueAtKeyPath": true
 		"getValuesAtKeyPaths": true
-		"handshake": true
 		"hasFocus": true
 		"isInFocusChain": true
 		"observeField": true
@@ -34,6 +33,7 @@ sub runTaskThread()
 	udpSocket.setMessagePort(m.port)
 	udpSocket.setAddress(address)
 	udpSocket.notifyReadable(true)
+	udpSocket.notifyException(true)
 	m.activeRequests = {}
 
 	while true
@@ -43,11 +43,16 @@ sub runTaskThread()
 			if messageType = "roSocketEvent" then
 				messageSocketId = stri(message.getSocketID())
 				if messageSocketId = udpSocketId
+
 					if udpSocket.isReadable() then
 						receivedString = udpSocket.receiveStr(udpSocket.getCountRcvBuf())
+						print "receivedString '" + receivedString + "'"
 						verifyAndHandleRequest(receivedString, udpSocket)
+					else
+						stop
 					end if
 				else
+					' stop
 					logWarn("Received roSocketEvent for unknown socket")
 				end if
 			else if messageType = "roSGNodeEvent" then
@@ -61,7 +66,8 @@ sub runTaskThread()
 					logWarn(fieldName + " not handled")
 				end if
 			else
-				logWarn(messageType + " type not handled")
+				' logWarn(messageType + " type not handled")
+				' stop
 			end if
 		end if
 	end while
@@ -81,16 +87,28 @@ sub verifyAndHandleRequest(receivedString as String, socket as Object)
 
 	request["callbackHost"] = socket.getReceivedFromAddress().getHostName()
 
+	componentVersion = getVersion()
+	requestVersion = getStringAtKeyPath(request, "version")
+
+	if requestVersion <> componentVersion then
+		sendBackError(request, "Request version " + requestVersion + " did not match component version " + componentVersion)
+		return
+	end if
+
+	setLogLevel(getStringAtKeyPath(request, "settings.logLevel"))
+
+	if NOT isAA(request.args) then
+		sendBackError(request, "No args supplied for request type '" + requestType + "'")
+		return
+	end if
+
 	requestType = getStringAtKeyPath(request, "type")
-
 	if m.validRequestTypes[requestType] = true then
-		if NOT isAA(request.args) then
-			sendBackError(request, "No args supplied for request type '" + requestType + "'")
-			return
-		end if
+		requestId = request.id
 
-		if requestType = "handshake" then
-			processHandshakeRequest(request)
+		if m.activeRequests[requestId] <> Invalid then
+			print "ignore" requestId
+			logVerbose("Ignoring request id " + requestId + ". Already received and running")
 		end if
 
 		m.activeRequests[request.id] = request
@@ -100,20 +118,8 @@ sub verifyAndHandleRequest(receivedString as String, socket as Object)
 	end if
 end sub
 
-sub processHandshakeRequest(request as Object)
-	args = request.args
-	setLogLevel(getStringAtKeyPath(args, "logLevel"))
-
-	version = getVersion()
-	if getStringAtKeyPath(args, "version") = version then
-		sendBackResponse(request, {
-			"success": true
-			"version": version
-		})
-	end if
-end sub
-
 sub sendBackError(request as Object, message as String)
+	logError(message)
 	sendBackResponse(request, buildErrorResponseObject(message))
 end sub
 
@@ -128,7 +134,11 @@ sub sendBackResponse(request as Object, response as Dynamic)
 	http = createObject("roUrlTransfer")
 	http.setUrl(callbackUrl)
 	http.addHeader("Content-Type", "application/json")
-
+	http.setPort(m.port)
+	' http.asyncPostFromString(formattedResponse)
 	code = http.postFromString(formattedResponse)
-	logVerbose("Sent callback to: " + callbackUrl + " and received response code: " + code.toStr() + " body: ", formattedResponse)
+	' test = code = 200
+	' print "test"
+	' logDebug("Sent callback to: " + callbackUrl + " and received response code: " + code.toStr() + " body: ", formattedResponse)
+	' m[http.GetIdentity().toStr()] = http
 end sub
